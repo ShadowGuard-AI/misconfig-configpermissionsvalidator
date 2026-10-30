@@ -1,3 +1,5 @@
+![Banner](banner.png)
+
 # misconfig-ConfigPermissionsValidator
 Validates file system permissions of configuration files against a defined policy to prevent unauthorized access or modification using chmod and stat. - Focused on Check for misconfigurations in configuration files or infrastructure definitions
 
