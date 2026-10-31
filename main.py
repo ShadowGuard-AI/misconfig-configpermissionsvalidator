@@ -95,21 +95,37 @@ def validate_permissions(config_file, policy, check_owner=False, check_group=Fal
         # Convert file permissions to octal string for comparison
         octal_permissions = oct(stat.S_IMODE(stat_info.st_mode))[2:]
 
-        # Policy permissions should be in octal string format (e.g., "640")
-        expected_permissions = policy["permissions"]
+        # Policy permissions may be written as "640", "0640", or the integer 640.
+        # All three spellings name the same octal value, so compare as integers.
+        if "permissions" not in policy:
+            raise ValueError("Policy does not define 'permissions'.")
+        expected_raw = policy["permissions"]
+        if isinstance(expected_raw, bool):
+            raise ValueError("Policy permissions must be an octal value (e.g., '640', '0640', or 640).")
+        if isinstance(expected_raw, int):
+            expected_text = str(expected_raw)
+        elif isinstance(expected_raw, str):
+            expected_text = expected_raw.strip()
+        else:
+            raise ValueError("Policy permissions must be an octal value (e.g., '640', '0640', or 640).")
+        if not expected_text or not all(c in "01234567" for c in expected_text):
+            raise ValueError("Policy permissions must be an octal value (e.g., '640', '0640', or 640).")
+        expected_permissions = int(expected_text, 8)
+        actual_permissions = stat.S_IMODE(stat_info.st_mode)
 
-        # Input validation for policy permissions
-        if not isinstance(expected_permissions, str) or not all(c in "01234567" for c in expected_permissions):
-            raise ValueError("Policy permissions must be an octal string (e.g., '640').")
-
-        if octal_permissions != expected_permissions:
+        if actual_permissions != expected_permissions:
             logging.error(
-                f"Permissions for {config_file} are {octal_permissions}, expected {expected_permissions}"
+                f"Permissions for {config_file} are {octal_permissions}, expected {expected_text}"
             )
             return False
 
         if check_owner:
             expected_owner = policy.get("owner")
+            if not expected_owner:
+                msg = "Owner check was not performed: the policy does not define an owner."
+                logging.error(msg)
+                print(msg)
+                return False
             if expected_owner:  # Ensure owner is defined in policy
                 import pwd
                 try:
@@ -125,6 +141,11 @@ def validate_permissions(config_file, policy, check_owner=False, check_group=Fal
 
         if check_group:
             expected_group = policy.get("group")
+            if not expected_group:
+                msg = "Group check was not performed: the policy does not define a group."
+                logging.error(msg)
+                print(msg)
+                return False
             if expected_group: # Ensure group is defined in policy
                 import grp
                 try:
