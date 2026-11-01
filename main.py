@@ -46,6 +46,9 @@ def load_policy(policy_path=None):
         try:
             with open(policy_path, "r") as f:
                 if policy_path.endswith(".json"):
+                    # The parser follows the policy file's suffix, checked case
+                    # sensitively, so a policy named .JSON is refused as an
+                    # unsupported format even though its contents are fine.
                     policy = json.load(f)
                 elif policy_path.endswith(".yaml") or policy_path.endswith(".yml"):
                     policy = yaml.safe_load(f)
@@ -89,6 +92,10 @@ def validate_permissions(config_file, policy, check_owner=False, check_group=Fal
         bool: True if the permissions are valid, False otherwise.
     """
     try:
+        # os.stat follows symlinks, so the permissions I judge are
+        # the target's. A link with loose permissions of its own
+        # pointing at a correctly permissioned file passes me, and
+        # the answer describes a file the operator did not name.
         stat_info = os.stat(config_file)
         file_permissions = stat.filemode(stat_info.st_mode)[1:]  # Remove file type prefix
 
@@ -110,9 +117,20 @@ def validate_permissions(config_file, policy, check_owner=False, check_group=Fal
             raise ValueError("Policy permissions must be an octal value (e.g., '640', '0640', or 640).")
         if not expected_text or not all(c in "01234567" for c in expected_text):
             raise ValueError("Policy permissions must be an octal value (e.g., '640', '0640', or 640).")
+        # One spelling quietly breaks this scheme: a YAML policy that
+        # writes the value with a leading zero and no quotes is read
+        # by PyYAML as an octal number already, so 0640 arrives here
+        # as the integer 416, becomes the text 416, and is converted
+        # a second time into a different permission set entirely.
+        # Quoting the value in the policy avoids the trap.
         expected_permissions = int(expected_text, 8)
         actual_permissions = stat.S_IMODE(stat_info.st_mode)
 
+        # The comparison is equality over every bit stat reports,
+        # including setuid and sticky bits. A file that is stricter
+        # than the policy, 600 against a policy of 640, fails just
+        # as a looser one does: I check for the named permissions,
+        # not for permissions at least as tight as them.
         if actual_permissions != expected_permissions:
             logging.error(
                 f"Permissions for {config_file} are {octal_permissions}, expected {expected_text}"
@@ -127,6 +145,10 @@ def validate_permissions(config_file, policy, check_owner=False, check_group=Fal
                 print(msg)
                 return False
             if expected_owner:  # Ensure owner is defined in policy
+                # Owner and group are only consulted when the matching flag
+                # was passed. The default policy names root for both, and
+                # without the flags those names are inert text in the policy
+                # that no run ever compares against the file.
                 import pwd
                 try:
                     owner_name = pwd.getpwuid(stat_info.st_uid).pw_name
